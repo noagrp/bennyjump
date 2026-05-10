@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>NEON_DROP // FULL_AUDIO</title>
+    <style>
+        :root { --bg: #000; --p1: #0ff; --p2: #f0f; }
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        
+        body { 
+            background: #111; color: #fff; font-family: 'Courier New', monospace; 
+            margin: 0; padding: 0; width: 100vw; height: 100dvh;
+            overflow: hidden; display: flex; justify-content: center;
+        }
+
+        #master-wrapper {
+            width: 100%; max-width: 450px; height: 100%; background: var(--bg);
+            display: flex; flex-direction: column; position: relative;
+            border-left: 1px solid #222; border-right: 1px solid #222;
+        }
+
+        #ui-layer {
+            height: 10%; width: 100%; display: flex; justify-content: space-between;
+            align-items: center; padding: 0 20px; border-bottom: 2px solid #333;
+            background: #0a0a0a; z-index: 10;
+        }
+
+        #game-area { flex-grow: 1; width: 100%; position: relative; overflow: hidden; }
+        canvas { display: block; width: 100%; height: 100%; }
+
+        #controls {
+            height: 18%; width: 100%; background: #050505;
+            display: grid; grid-template-columns: 1fr 1.5fr 1fr;
+            gap: 10px; padding: 12px; border-top: 2px solid #333;
+        }
+        .btn {
+            background: #151515; border: 2px solid #444; color: #fff;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1rem; font-weight: bold; border-radius: 8px; cursor: pointer;
+            user-select: none; touch-action: none;
+        }
+        .btn:active { background: #fff; color: #000; }
+        .jump-btn { color: var(--p2); border-color: var(--p2); font-size: 1.2rem; }
+
+        #overlay {
+            position: absolute; inset: 0; background: rgba(0,0,0,0.95);
+            display: none; flex-direction: column; align-items: center; justify-content: center; z-index: 100;
+        }
+        .restart-btn {
+            margin-top:20px; padding: 15px 40px; border: 2px solid var(--p1); 
+            background:none; color:var(--p1); font-weight:bold; cursor:pointer;
+            letter-spacing: 2px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="master-wrapper">
+    <div id="ui-layer">
+        <span id="lvl-txt" style="color:var(--p1)">LVL: 1</span>
+        <span id="score-txt">BLOCKS: 0/10</span>
+    </div>
+
+    <main id="game-area">
+        <canvas id="gameCanvas"></canvas>
+        <div id="overlay">
+            <h1 style="color:red; font-size: 3rem; text-align:center; text-shadow: 0 0 15px red;">GAME OVER</h1>
+            <button class="restart-btn" onclick="resetGame()">RESTART</button>
+        </div>
+    </main>
+
+    <footer id="controls">
+        <div class="btn" id="btn-left">LEFT</div>
+        <div class="btn jump-btn" id="btn-up">JUMP</div>
+        <div class="btn" id="btn-right">RIGHT</div>
+    </footer>
+</div>
+
+<script>
+// --- ADVANCED SOUND ENGINE ---
+let audioCtx;
+function playFX(freq, type, vol, dur) {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    try {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + dur);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + dur);
+    } catch(e) {}
+}
+
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+let level = 1, blocks = 0, isGameOver = false, animationId;
+let player = { x: 0, y: 0, vx: 0, vy: 0, w: 30, h: 50, facing: 1, step: 0, grounded: false };
+let platforms = [], keys = {};
+const RAINBOW = ['#f00', '#ff0', '#0f0', '#0ff', '#00f', '#f0f', '#fff'];
+
+function init() {
+    cancelAnimationFrame(animationId);
+    canvas.width = canvas.offsetWidth;
+    canvas.height = canvas.offsetHeight;
+    
+    isGameOver = false;
+    level = 1; 
+    blocks = 0;
+    updateUI();
+    
+    player.x = canvas.width / 2 - 15;
+    player.y = 150;
+    player.vx = 0; player.vy = 0;
+    player.grounded = false;
+    
+    platforms = [];
+    platforms.push({ x: canvas.width / 2 - 40, y: 250, w: 80, h: 12, passed: true, color: '#0ff' });
+    for(let i=1; i<7; i++) {
+        platforms.push({
+            x: Math.random() * (canvas.width - 80),
+            y: 250 + (i * 130), w: 80, h: 12, passed: false,
+            color: RAINBOW[Math.floor(Math.random() * RAINBOW.length)]
+        });
+    }
+
+    // 1. RESTART SOUND (Bright "Power Up" sweep)
+    playFX(880, 'sine', 0.2, 0.4);
+    
+    gameLoop();
+}
+
+function drawStickman(p) {
+    ctx.save();
+    ctx.translate(p.x + 15, p.y + 25);
+    const col = p.vy < 0 ? '#f0f' : '#0ff';
+    ctx.strokeStyle = col; ctx.lineWidth = 3; ctx.shadowBlur = 15; ctx.shadowColor = col;
+    ctx.beginPath(); ctx.arc(0, -15, 7, 0, Math.PI*2);
+    ctx.moveTo(0, -8); ctx.lineTo(0, 7);
+    let lM = 0, aM = 0;
+    if(!p.grounded) { lM = 0.4; aM = p.vy < 0 ? -1.2 : 0.5; }
+    else if(Math.abs(p.vx) > 0.1) { lM = Math.sin(p.step)*0.8; aM = Math.sin(p.step)*0.6; }
+    ctx.moveTo(0, -5); ctx.lineTo(p.facing*15, -5 + (aM*10));
+    ctx.moveTo(0, -5); ctx.lineTo(-p.facing*12, -5 - (aM*5));
+    ctx.moveTo(0, 7); ctx.lineTo(p.facing*15*Math.sin(lM), 25);
+    ctx.moveTo(0, 7); ctx.lineTo(-p.facing*15*Math.sin(lM), 25);
+    ctx.stroke(); ctx.restore();
+}
+
+function gameLoop() {
+    if (isGameOver) return;
+
+    let scroll = 0.8 + (level * 0.4);
+    platforms.forEach(pl => pl.y -= scroll);
+    player.y -= scroll;
+
+    const speed = 1.0 + (level * 0.1);
+    let isMoving = false;
+
+    if (keys['ArrowLeft'] || keys['LeftBtn']) { 
+        player.vx -= speed; player.facing = -1; player.step += 0.2; 
+        isMoving = true;
+    } else if (keys['ArrowRight'] || keys['RightBtn']) { 
+        player.vx += speed; player.facing = 1; player.step += 0.2; 
+        isMoving = true;
+    } else { 
+        player.vx *= 0.85; player.step = 0; 
+    }
+
+    // 2. MOVING SOUND (Low, subtle electronic hum)
+    if (isMoving && player.grounded && Math.floor(player.step * 10) % 15 === 0) {
+        playFX(120, 'triangle', 0.03, 0.05);
+    }
+
+    // 3. JUMP SOUND (Sharp "pop" sound)
+    if ((keys['ArrowUp'] || keys['UpBtn']) && player.grounded) {
+        player.vy = -14; player.grounded = false;
+        playFX(500, 'square', 0.15, 0.1);
+    }
+
+    player.vy += 0.6;
+    player.x += player.vx;
+    player.y += player.vy;
+
+    if (player.x > canvas.width) player.x = -20;
+    if (player.x < -20) player.x = canvas.width;
+
+    player.grounded = false;
+    platforms.forEach(pl => {
+        if (player.vy > 0 && player.x+25 > pl.x && player.x < pl.x+pl.w && player.y+50 > pl.y && player.y+50 < pl.y+15) {
+            player.vy = 0; player.y = pl.y - 50; player.grounded = true;
+            if (!pl.passed) { 
+                pl.passed = true; blocks++; 
+                playFX(300 + (level * 20), 'sine', 0.1, 0.1); // Landing
+                if (blocks >= 10) { level++; blocks = 0; playFX(900, 'sine', 0.2, 0.3); } // Level Up
+                updateUI();
+            }
+        }
+    });
+
+    for(let i=platforms.length-1; i>=0; i--) {
+        if (platforms[i].y < -30) {
+            platforms.splice(i, 1);
+            platforms.push({
+                x: Math.random() * (canvas.width - 80),
+                y: canvas.height + 50, w: 80, h: 12, passed: false,
+                color: RAINBOW[Math.floor(Math.random() * RAINBOW.length)]
+            });
+        }
+    }
+
+    // 4. FALL DEAD SOUND (Deep "crash" sound)
+    if (player.y < -60 || player.y > canvas.height + 60) {
+        isGameOver = true;
+        playFX(60, 'sawtooth', 0.3, 0.6);
+        document.getElementById('overlay').style.display = 'flex';
+        return;
+    }
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    platforms.forEach(pl => {
+        ctx.shadowBlur = 15; ctx.shadowColor = pl.color;
+        ctx.strokeStyle = pl.color; ctx.lineWidth = 3;
+        ctx.strokeRect(pl.x, pl.y, pl.w, pl.h);
+        ctx.shadowBlur = 0;
+    });
+    drawStickman(player);
+    animationId = requestAnimationFrame(gameLoop);
+}
+
+function updateUI() {
+    document.getElementById('score-txt').innerText = `BLOCKS: ${blocks}/10`;
+    document.getElementById('lvl-txt').innerText = `LVL: ${level}`;
+}
+
+function resetGame() {
+    document.getElementById('overlay').style.display = 'none';
+    init();
+}
+
+window.addEventListener('keydown', e => keys[e.code] = true);
+window.addEventListener('keyup', e => keys[e.code] = false);
+
+const setupBtn = (id, key) => {
+    const b = document.getElementById(id);
+    b.addEventListener('pointerdown', e => { 
+        e.preventDefault(); 
+        keys[key] = true; 
+        if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    });
+    b.addEventListener('pointerup', e => { e.preventDefault(); keys[key] = false; });
+    b.addEventListener('pointerleave', e => { keys[key] = false; });
+};
+setupBtn('btn-up', 'UpBtn'); setupBtn('btn-left', 'LeftBtn'); setupBtn('btn-right', 'RightBtn');
+
+window.onload = init;
+</script>
+</body>
+</html>
