@@ -133,65 +133,79 @@ function init() {
     gameLoop();
 }
 
-// --- REFINED STICKMAN ENGINE ---
-function drawLimb(ctx, x, y, angle, length1, length2, facing, sideOffset, isArm) {
-    // Upper part
-    let jX = x + Math.sin(angle * sideOffset) * length1 * facing;
-    let jY = y + Math.cos(angle * sideOffset) * length1;
-
-    // Lower part (adds joint bend)
-    let bend = isArm ? 0.8 : 1.2; 
-    let eX = jX + Math.sin(angle * sideOffset * bend) * length2 * facing;
-    let eY = jY + Math.cos(angle * sideOffset * bend) * length2;
+// --- HUMANIZED REFINED STICKMAN ---
+function drawHumanoidLimb(ctx, x, y, angle, l1, l2, facing, side, thickness) {
+    ctx.lineWidth = thickness;
+    let jointX = x + Math.sin(angle * side) * l1 * facing;
+    let jointY = y + Math.cos(angle * side) * l1;
+    let endX = jointX + Math.sin(angle * side * 1.5) * l2 * facing;
+    let endY = jointY + Math.cos(angle * side * 1.5) * l2;
 
     ctx.beginPath();
     ctx.moveTo(x, y);
-    ctx.lineTo(jX, jY);
-    ctx.lineTo(eX, eY);
+    ctx.lineTo(jointX, jointY);
+    ctx.lineTo(endX, endY);
     ctx.stroke();
 }
 
 function drawStickman(p) {
     ctx.save();
     ctx.translate(p.x + 15, p.y + 25);
+    
+    const isMoving = Math.abs(p.vx) > 0.1;
     const col = p.vy < 0 ? '#f0f' : '#0ff';
-    ctx.strokeStyle = col; 
-    ctx.lineWidth = 3; 
+    ctx.strokeStyle = col;
+    ctx.fillStyle = col;
     ctx.lineCap = 'round';
-    ctx.shadowBlur = 15; 
+    ctx.lineJoin = 'round';
+    ctx.shadowBlur = 15;
     ctx.shadowColor = col;
 
-    // Head
-    ctx.beginPath(); 
-    ctx.arc(0, -18, 7, 0, Math.PI*2);
-    ctx.stroke();
+    // Movement Calculations
+    let movePhase = Math.sin(p.step);
+    let armAngle, legAngle, torsoCurve;
 
-    // Body (Curved spine)
-    ctx.beginPath();
-    ctx.moveTo(0, -11);
-    ctx.quadraticCurveTo(p.facing * 2, -2, 0, 7);
-    ctx.stroke();
-
-    let moveMod = Math.abs(p.vx) > 0.1 ? Math.sin(p.step) : 0.2;
-    let armAngle, legAngle;
-
-    if(!p.grounded) {
-        // Air Pose
-        armAngle = -1.5; 
-        legAngle = p.vy < 0 ? 1.3 : 0.4;
+    if (!p.grounded) {
+        // Jump/Air Pose
+        armAngle = -2.2; // Arms reaching up
+        legAngle = p.vy < 0 ? 1.5 : 0.5; // Tuck knees on way up, extend on way down
+        torsoCurve = p.facing * 5;
+    } else if (isMoving) {
+        // Run Pose
+        armAngle = movePhase * 1.2;
+        legAngle = movePhase * 1.0;
+        torsoCurve = p.facing * 3;
     } else {
-        // Ground Pose
-        armAngle = moveMod * 0.8;
-        legAngle = moveMod * 0.7;
+        // Stand Pose
+        armAngle = 0.3;
+        legAngle = 0.2;
+        torsoCurve = 0;
     }
 
-    // Arms
-    drawLimb(ctx, 0, -8, armAngle, 10, 10, p.facing, 1, true);
-    drawLimb(ctx, 0, -8, -armAngle, 8, 8, p.facing, -1, true);
+    // 1. Head (Thicker stroke)
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(0, -18, 8, 0, Math.PI * 2);
+    ctx.stroke();
 
-    // Legs
-    drawLimb(ctx, 0, 7, legAngle, 12, 12, p.facing, 1, false);
-    drawLimb(ctx, 0, 7, -legAngle, 12, 12, p.facing, -1, false);
+    // 2. Torso (Human shape - thicker chest)
+    ctx.beginPath();
+    ctx.moveTo(0, -10);
+    ctx.quadraticCurveTo(torsoCurve, -2, 0, 8);
+    ctx.lineWidth = 8; // Thicker torso
+    ctx.stroke();
+
+    // 3. Arms (Human segments)
+    // Back Arm
+    drawHumanoidLimb(ctx, 0, -8, -armAngle, 10, 10, p.facing, -1, 4);
+    // Front Arm
+    drawHumanoidLimb(ctx, 0, -8, armAngle, 10, 10, p.facing, 1, 4);
+
+    // 4. Legs (Human segments)
+    // Back Leg
+    drawHumanoidLimb(ctx, 0, 8, -legAngle, 13, 13, p.facing, -1, 5);
+    // Front Leg
+    drawHumanoidLimb(ctx, 0, 8, legAngle, 13, 13, p.facing, 1, 5);
 
     ctx.restore();
 }
@@ -217,12 +231,10 @@ function gameLoop() {
         player.step *= 0.8; 
     }
 
-    // 2. MOVING SOUND
     if (isMoving && player.grounded && Math.floor(player.step * 10) % 15 === 0) {
         playFX(120, 'triangle', 0.03, 0.05);
     }
 
-    // 3. JUMP SOUND
     if ((keys['ArrowUp'] || keys['UpBtn']) && player.grounded) {
         player.vy = -14; player.grounded = false;
         playFX(500, 'square', 0.15, 0.1);
@@ -241,8 +253,8 @@ function gameLoop() {
             player.vy = 0; player.y = pl.y - 50; player.grounded = true;
             if (!pl.passed) { 
                 pl.passed = true; blocks++; 
-                playFX(300 + (level * 20), 'sine', 0.1, 0.1); // Landing
-                if (blocks >= 10) { level++; blocks = 0; playFX(900, 'sine', 0.2, 0.3); } // Level Up
+                playFX(300 + (level * 20), 'sine', 0.1, 0.1);
+                if (blocks >= 10) { level++; blocks = 0; playFX(900, 'sine', 0.2, 0.3); }
                 updateUI();
             }
         }
@@ -259,7 +271,6 @@ function gameLoop() {
         }
     }
 
-    // 4. FALL DEAD SOUND
     if (player.y < -60 || player.y > canvas.height + 60) {
         isGameOver = true;
         playFX(60, 'sawtooth', 0.3, 0.6);
