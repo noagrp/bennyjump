@@ -78,7 +78,6 @@
 </div>
 
 <script>
-// --- ADVANCED SOUND ENGINE ---
 let audioCtx;
 function playFX(freq, type, vol, dur) {
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -99,7 +98,7 @@ function playFX(freq, type, vol, dur) {
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 let level = 1, blocks = 0, isGameOver = false, animationId;
-let player = { x: 0, y: 0, vx: 0, vy: 0, w: 30, h: 50, facing: 1, step: 0, grounded: false };
+let player = { x: 0, y: 0, vx: 0, vy: 0, w: 30, h: 50, facing: 1, step: 0, grounded: false, lastVy: 0 };
 let platforms = [], keys = {};
 const RAINBOW = ['#f00', '#ff0', '#0f0', '#0ff', '#00f', '#f0f', '#fff'];
 
@@ -107,209 +106,129 @@ function init() {
     cancelAnimationFrame(animationId);
     canvas.width = canvas.offsetWidth;
     canvas.height = canvas.offsetHeight;
-    
-    isGameOver = false;
-    level = 1; 
-    blocks = 0;
-    updateUI();
-    
-    player.x = canvas.width / 2 - 15;
-    player.y = 150;
-    player.vx = 0; player.vy = 0;
-    player.grounded = false;
-    
-    platforms = [];
-    platforms.push({ x: canvas.width / 2 - 40, y: 250, w: 80, h: 12, passed: true, color: '#0ff' });
+    isGameOver = false; level = 1; blocks = 0; updateUI();
+    player.x = canvas.width / 2 - 15; player.y = 150;
+    player.vx = 0; player.vy = 0; player.grounded = false;
+    platforms = [{ x: canvas.width / 2 - 40, y: 250, w: 80, h: 12, passed: true, color: '#0ff' }];
     for(let i=1; i<7; i++) {
-        platforms.push({
-            x: Math.random() * (canvas.width - 80),
-            y: 250 + (i * 130), w: 80, h: 12, passed: false,
-            color: RAINBOW[Math.floor(Math.random() * RAINBOW.length)]
-        });
+        platforms.push({ x: Math.random() * (canvas.width - 80), y: 250 + (i * 130), w: 80, h: 12, passed: false, color: RAINBOW[Math.floor(Math.random() * RAINBOW.length)] });
     }
-
     playFX(880, 'sine', 0.2, 0.4);
-    
     gameLoop();
 }
 
-// --- HUMANIZED REFINED STICKMAN DRAWING ---
-function drawHumanLimb(ctx, x, y, angle, l1, l2, facing, side, thick) {
+function drawAnatomicalLimb(ctx, x, y, angle, l1, l2, facing, sideOffset, thick, isBack) {
     ctx.lineWidth = thick;
-    // Joint (Knee/Elbow)
-    let jX = x + Math.sin(angle * side) * l1 * facing;
-    let jY = y + Math.cos(angle * side) * l1;
-    // Extremity (Foot/Hand)
-    let eX = jX + Math.sin(angle * side * 1.5) * l2 * facing;
-    let eY = jY + Math.cos(angle * side * 1.5) * l2;
+    ctx.globalAlpha = isBack ? 0.5 : 1.0;
+    
+    // Joint logic (angle limited to prevent "U" folding)
+    let jX = x + Math.sin(angle) * l1 * facing;
+    let jY = y + Math.cos(angle) * l1;
+    
+    // Lower limb stays more vertical for a natural look
+    let lowerAngle = angle * 0.5;
+    let eX = jX + Math.sin(lowerAngle) * l2 * facing;
+    let eY = jY + Math.cos(lowerAngle) * l2;
 
     ctx.beginPath();
     ctx.moveTo(x, y);
     ctx.lineTo(jX, jY);
     ctx.lineTo(eX, eY);
     ctx.stroke();
+    ctx.globalAlpha = 1.0;
 }
 
 function drawStickman(p) {
     ctx.save();
-    ctx.translate(p.x + 15, p.y + 25);
+    let squash = (p.grounded && p.lastVy > 4) ? Math.min(p.lastVy * 0.5, 6) : 0;
+    ctx.translate(p.x + 15, p.y + 25 + squash);
     
-    const isMoving = Math.abs(p.vx) > 0.1;
+    const moving = Math.abs(p.vx) > 0.1;
     const col = p.vy < 0 ? '#f0f' : '#0ff';
-    ctx.strokeStyle = col;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.shadowBlur = 15;
-    ctx.shadowColor = col;
+    ctx.strokeStyle = col; ctx.fillStyle = col;
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.shadowBlur = 10; ctx.shadowColor = col;
 
-    let armAngle, legAngle, torsoCurve;
-    let moveMod = Math.sin(p.step);
+    let armAng, legAng;
+    let walk = Math.sin(p.step);
 
     if (!p.grounded) {
-        // Jump/Fall Pose (Both legs visible and tucked)
-        armAngle = -2.0; 
-        legAngle = p.vy < 0 ? 1.4 : 0.6; 
-        torsoCurve = p.facing * 4;
-    } else if (isMoving) {
-        // Running Pose (Two legs scissor)
-        armAngle = moveMod * 1.1;
-        legAngle = moveMod * 1.0;
-        torsoCurve = p.facing * 3;
+        // Natural airborne pose: arms neutral, legs slightly tucked
+        armAng = -1.2; 
+        legAng = p.vy < 0 ? 0.8 : 0.2; 
+    } else if (moving) {
+        armAng = walk * 1.0;
+        legAng = walk * 0.8;
     } else {
-        // Stand Pose (Both legs visible, slightly apart)
-        armAngle = 0.3;
-        legAngle = 0.2;
-        torsoCurve = 0;
+        armAng = 0.2;
+        legAng = 0.15;
     }
 
-    // 1. Head
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.arc(0, -18, 8, 0, Math.PI * 2);
-    ctx.stroke();
+    // 1. Head (Leaner)
+    ctx.beginPath(); ctx.arc(0, -21, 7, 0, Math.PI * 2); ctx.fill();
 
-    // 2. Torso (Humanoid Thickness)
-    ctx.lineWidth = 8;
-    ctx.beginPath();
-    ctx.moveTo(0, -10);
-    ctx.quadraticCurveTo(torsoCurve, -2, 0, 8);
-    ctx.stroke();
+    // 2. Torso (Straight capsule, slender)
+    ctx.lineWidth = 6;
+    ctx.beginPath(); ctx.moveTo(0, -14); ctx.lineTo(0, 7); ctx.stroke();
 
-    // 3. Arms (Two arms always drawn)
-    drawHumanLimb(ctx, 0, -8, -armAngle, 10, 10, p.facing, -1, 4); // Back arm
-    drawHumanLimb(ctx, 0, -8, armAngle, 10, 10, p.facing, 1, 4);  // Front arm
+    // 3. Arms
+    drawAnatomicalLimb(ctx, 0, -11, -armAng, 9, 8, p.facing, -1, 3, true); // Back
+    drawAnatomicalLimb(ctx, 0, -11, armAng, 9, 8, p.facing, 1, 3, false); // Front
 
-    // 4. Legs (Two legs always drawn)
-    drawHumanLimb(ctx, 0, 8, -legAngle, 13, 13, p.facing, -1, 5); // Back leg
-    drawHumanLimb(ctx, 0, 8, legAngle, 13, 13, p.facing, 1, 5);  // Front leg
+    // 4. Legs (Offset hips to ensure two legs are always visible)
+    drawAnatomicalLimb(ctx, -2 * p.facing, 7, -legAng - 0.1, 11, 11, p.facing, -1, 4, true); // Back
+    drawAnatomicalLimb(ctx, 2 * p.facing, 7, legAng + 0.1, 11, 11, p.facing, 1, 4, false);  // Front
 
     ctx.restore();
 }
 
 function gameLoop() {
     if (isGameOver) return;
-
     let scroll = 0.8 + (level * 0.4);
     platforms.forEach(pl => pl.y -= scroll);
     player.y -= scroll;
-
     const speed = 1.0 + (level * 0.1);
-    let isMoving = false;
-
-    if (keys['ArrowLeft'] || keys['LeftBtn']) { 
-        player.vx -= speed; player.facing = -1; player.step += 0.2; 
-        isMoving = true;
-    } else if (keys['ArrowRight'] || keys['RightBtn']) { 
-        player.vx += speed; player.facing = 1; player.step += 0.2; 
-        isMoving = true;
-    } else { 
-        player.vx *= 0.85; 
-        player.step *= 0.8; 
-    }
-
-    if (isMoving && player.grounded && Math.floor(player.step * 10) % 15 === 0) {
-        playFX(120, 'triangle', 0.03, 0.05);
-    }
-
-    if ((keys['ArrowUp'] || keys['UpBtn']) && player.grounded) {
-        player.vy = -14; player.grounded = false;
-        playFX(500, 'square', 0.15, 0.1);
-    }
-
-    player.vy += 0.6;
-    player.x += player.vx;
-    player.y += player.vy;
-
-    if (player.x > canvas.width) player.x = -20;
-    if (player.x < -20) player.x = canvas.width;
-
-    player.grounded = false;
+    let moving = false;
+    if (keys['ArrowLeft'] || keys['LeftBtn']) { player.vx -= speed; player.facing = -1; player.step += 0.2; moving = true; }
+    else if (keys['ArrowRight'] || keys['RightBtn']) { player.vx += speed; player.facing = 1; player.step += 0.2; moving = true; }
+    else { player.vx *= 0.85; player.step *= 0.8; }
+    if (moving && player.grounded && Math.floor(player.step * 10) % 15 === 0) playFX(120, 'triangle', 0.03, 0.05);
+    if ((keys['ArrowUp'] || keys['UpBtn']) && player.grounded) { player.vy = -14; player.grounded = false; playFX(500, 'square', 0.15, 0.1); }
+    player.vy += 0.6; player.x += player.vx; player.y += player.vy;
+    if (player.x > canvas.width) player.x = -20; if (player.x < -20) player.x = canvas.width;
+    let wasGrounded = player.grounded; player.grounded = false;
     platforms.forEach(pl => {
         if (player.vy > 0 && player.x+25 > pl.x && player.x < pl.x+pl.w && player.y+50 > pl.y && player.y+50 < pl.y+15) {
+            if (!wasGrounded) { player.lastVy = player.vy; playFX(300 + (level * 20), 'sine', 0.1, 0.1); }
             player.vy = 0; player.y = pl.y - 50; player.grounded = true;
-            if (!pl.passed) { 
-                pl.passed = true; blocks++; 
-                playFX(300 + (level * 20), 'sine', 0.1, 0.1);
-                if (blocks >= 10) { level++; blocks = 0; playFX(900, 'sine', 0.2, 0.3); }
-                updateUI();
-            }
+            if (!pl.passed) { pl.passed = true; blocks++; if (blocks >= 10) { level++; blocks = 0; playFX(900, 'sine', 0.2, 0.3); } updateUI(); }
         }
     });
-
+    if (player.grounded) player.lastVy *= 0.8;
     for(let i=platforms.length-1; i>=0; i--) {
         if (platforms[i].y < -30) {
             platforms.splice(i, 1);
-            platforms.push({
-                x: Math.random() * (canvas.width - 80),
-                y: canvas.height + 50, w: 80, h: 12, passed: false,
-                color: RAINBOW[Math.floor(Math.random() * RAINBOW.length)]
-            });
+            platforms.push({ x: Math.random() * (canvas.width - 80), y: canvas.height + 50, w: 80, h: 12, passed: false, color: RAINBOW[Math.floor(Math.random() * RAINBOW.length)] });
         }
     }
-
-    if (player.y < -60 || player.y > canvas.height + 60) {
-        isGameOver = true;
-        playFX(60, 'sawtooth', 0.3, 0.6);
-        document.getElementById('overlay').style.display = 'flex';
-        return;
-    }
-
+    if (player.y < -60 || player.y > canvas.height + 60) { isGameOver = true; playFX(60, 'sawtooth', 0.3, 0.6); document.getElementById('overlay').style.display = 'flex'; return; }
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    platforms.forEach(pl => {
-        ctx.shadowBlur = 15; ctx.shadowColor = pl.color;
-        ctx.strokeStyle = pl.color; ctx.lineWidth = 3;
-        ctx.strokeRect(pl.x, pl.y, pl.w, pl.h);
-        ctx.shadowBlur = 0;
-    });
+    platforms.forEach(pl => { ctx.shadowBlur = 15; ctx.shadowColor = pl.color; ctx.strokeStyle = pl.color; ctx.lineWidth = 3; ctx.strokeRect(pl.x, pl.y, pl.w, pl.h); ctx.shadowBlur = 0; });
     drawStickman(player);
     animationId = requestAnimationFrame(gameLoop);
 }
 
-function updateUI() {
-    document.getElementById('score-txt').innerText = `BLOCKS: ${blocks}/10`;
-    document.getElementById('lvl-txt').innerText = `LVL: ${level}`;
-}
-
-function resetGame() {
-    document.getElementById('overlay').style.display = 'none';
-    init();
-}
-
+function updateUI() { document.getElementById('score-txt').innerText = `BLOCKS: ${blocks}/10`; document.getElementById('lvl-txt').innerText = `LVL: ${level}`; }
+function resetGame() { document.getElementById('overlay').style.display = 'none'; init(); }
 window.addEventListener('keydown', e => keys[e.code] = true);
 window.addEventListener('keyup', e => keys[e.code] = false);
-
 const setupBtn = (id, key) => {
     const b = document.getElementById(id);
-    b.addEventListener('pointerdown', e => { 
-        e.preventDefault(); 
-        keys[key] = true; 
-        if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
-    });
+    b.addEventListener('pointerdown', e => { e.preventDefault(); keys[key] = true; if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume(); });
     b.addEventListener('pointerup', e => { e.preventDefault(); keys[key] = false; });
     b.addEventListener('pointerleave', e => { keys[key] = false; });
 };
 setupBtn('btn-up', 'UpBtn'); setupBtn('btn-left', 'LeftBtn'); setupBtn('btn-right', 'RightBtn');
-
 window.onload = init;
 </script>
 </body>
