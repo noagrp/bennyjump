@@ -133,18 +133,20 @@ function init() {
     gameLoop();
 }
 
-// --- HUMANIZED REFINED STICKMAN ---
-function drawHumanoidLimb(ctx, x, y, angle, l1, l2, facing, side, thickness) {
-    ctx.lineWidth = thickness;
-    let jointX = x + Math.sin(angle * side) * l1 * facing;
-    let jointY = y + Math.cos(angle * side) * l1;
-    let endX = jointX + Math.sin(angle * side * 1.5) * l2 * facing;
-    let endY = jointY + Math.cos(angle * side * 1.5) * l2;
+// --- HUMANIZED REFINED STICKMAN DRAWING ---
+function drawHumanLimb(ctx, x, y, angle, l1, l2, facing, side, thick) {
+    ctx.lineWidth = thick;
+    // Joint (Knee/Elbow)
+    let jX = x + Math.sin(angle * side) * l1 * facing;
+    let jY = y + Math.cos(angle * side) * l1;
+    // Extremity (Foot/Hand)
+    let eX = jX + Math.sin(angle * side * 1.5) * l2 * facing;
+    let eY = jY + Math.cos(angle * side * 1.5) * l2;
 
     ctx.beginPath();
     ctx.moveTo(x, y);
-    ctx.lineTo(jointX, jointY);
-    ctx.lineTo(endX, endY);
+    ctx.lineTo(jX, jY);
+    ctx.lineTo(eX, eY);
     ctx.stroke();
 }
 
@@ -155,57 +157,51 @@ function drawStickman(p) {
     const isMoving = Math.abs(p.vx) > 0.1;
     const col = p.vy < 0 ? '#f0f' : '#0ff';
     ctx.strokeStyle = col;
-    ctx.fillStyle = col;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.shadowBlur = 15;
     ctx.shadowColor = col;
 
-    // Movement Calculations
-    let movePhase = Math.sin(p.step);
     let armAngle, legAngle, torsoCurve;
+    let moveMod = Math.sin(p.step);
 
     if (!p.grounded) {
-        // Jump/Air Pose
-        armAngle = -2.2; // Arms reaching up
-        legAngle = p.vy < 0 ? 1.5 : 0.5; // Tuck knees on way up, extend on way down
-        torsoCurve = p.facing * 5;
+        // Jump/Fall Pose (Both legs visible and tucked)
+        armAngle = -2.0; 
+        legAngle = p.vy < 0 ? 1.4 : 0.6; 
+        torsoCurve = p.facing * 4;
     } else if (isMoving) {
-        // Run Pose
-        armAngle = movePhase * 1.2;
-        legAngle = movePhase * 1.0;
+        // Running Pose (Two legs scissor)
+        armAngle = moveMod * 1.1;
+        legAngle = moveMod * 1.0;
         torsoCurve = p.facing * 3;
     } else {
-        // Stand Pose
+        // Stand Pose (Both legs visible, slightly apart)
         armAngle = 0.3;
         legAngle = 0.2;
         torsoCurve = 0;
     }
 
-    // 1. Head (Thicker stroke)
+    // 1. Head
     ctx.lineWidth = 4;
     ctx.beginPath();
     ctx.arc(0, -18, 8, 0, Math.PI * 2);
     ctx.stroke();
 
-    // 2. Torso (Human shape - thicker chest)
+    // 2. Torso (Humanoid Thickness)
+    ctx.lineWidth = 8;
     ctx.beginPath();
     ctx.moveTo(0, -10);
     ctx.quadraticCurveTo(torsoCurve, -2, 0, 8);
-    ctx.lineWidth = 8; // Thicker torso
     ctx.stroke();
 
-    // 3. Arms (Human segments)
-    // Back Arm
-    drawHumanoidLimb(ctx, 0, -8, -armAngle, 10, 10, p.facing, -1, 4);
-    // Front Arm
-    drawHumanoidLimb(ctx, 0, -8, armAngle, 10, 10, p.facing, 1, 4);
+    // 3. Arms (Two arms always drawn)
+    drawHumanLimb(ctx, 0, -8, -armAngle, 10, 10, p.facing, -1, 4); // Back arm
+    drawHumanLimb(ctx, 0, -8, armAngle, 10, 10, p.facing, 1, 4);  // Front arm
 
-    // 4. Legs (Human segments)
-    // Back Leg
-    drawHumanoidLimb(ctx, 0, 8, -legAngle, 13, 13, p.facing, -1, 5);
-    // Front Leg
-    drawHumanoidLimb(ctx, 0, 8, legAngle, 13, 13, p.facing, 1, 5);
+    // 4. Legs (Two legs always drawn)
+    drawHumanLimb(ctx, 0, 8, -legAngle, 13, 13, p.facing, -1, 5); // Back leg
+    drawHumanLimb(ctx, 0, 8, legAngle, 13, 13, p.facing, 1, 5);  // Front leg
 
     ctx.restore();
 }
