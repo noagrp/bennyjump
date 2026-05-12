@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>BennyJump</title>
+    <title>Benny Jump</title>
     <style>
         :root { --bg: #000; --p1: #0ff; --p2: #f0f; }
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -97,10 +97,10 @@ function playFX(freq, type, vol, dur) {
 
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
-let level = 1, blocks = 0, isGameOver = false, animationId;
+let level = 1, blocks = 0, isGameOver = false, animationId, hue = 0;
 let player = { x: 0, y: 0, vx: 0, vy: 0, w: 30, h: 50, facing: 1, step: 0, grounded: false, lastVy: 0 };
 let platforms = [], keys = {};
-const RAINBOW = ['#f00', '#ff0', '#0f0', '#0ff', '#00f', '#f0f', '#fff'];
+const RAINBOW = ['#ff0044', '#00ffcc', '#ffff00', '#ff00ff', '#0099ff', '#ff6600', '#ffffff'];
 
 function init() {
     cancelAnimationFrame(animationId);
@@ -109,9 +109,9 @@ function init() {
     isGameOver = false; level = 1; blocks = 0; updateUI();
     player.x = canvas.width / 2 - 15; player.y = 150;
     player.vx = 0; player.vy = 0; player.grounded = false;
-    platforms = [{ x: canvas.width / 2 - 40, y: 250, w: 80, h: 12, passed: true, color: '#0ff' }];
+    platforms = [{ x: canvas.width / 2 - 40, y: 250, w: 80, h: 20, passed: true, color: '#0ff' }];
     for(let i=1; i<7; i++) {
-        platforms.push({ x: Math.random() * (canvas.width - 80), y: 250 + (i * 130), w: 80, h: 12, passed: false, color: RAINBOW[Math.floor(Math.random() * RAINBOW.length)] });
+        platforms.push({ x: Math.random() * (canvas.width - 80), y: 250 + (i * 130), w: 80, h: 20, passed: false, color: RAINBOW[Math.floor(Math.random() * RAINBOW.length)] });
     }
     playFX(880, 'sine', 0.2, 0.4);
     gameLoop();
@@ -120,16 +120,11 @@ function init() {
 function drawAnatomicalLimb(ctx, x, y, angle, l1, l2, facing, sideOffset, thick, isBack) {
     ctx.lineWidth = thick;
     ctx.globalAlpha = isBack ? 0.5 : 1.0;
-    
-    // Joint logic (angle limited to prevent "U" folding)
     let jX = x + Math.sin(angle) * l1 * facing;
     let jY = y + Math.cos(angle) * l1;
-    
-    // Lower limb stays more vertical for a natural look
     let lowerAngle = angle * 0.5;
     let eX = jX + Math.sin(lowerAngle) * l2 * facing;
     let eY = jY + Math.cos(lowerAngle) * l2;
-
     ctx.beginPath();
     ctx.moveTo(x, y);
     ctx.lineTo(jX, jY);
@@ -144,16 +139,19 @@ function drawStickman(p) {
     ctx.translate(p.x + 15, p.y + 25 + squash);
     
     const moving = Math.abs(p.vx) > 0.1;
-    const col = p.vy < 0 ? '#f0f' : '#0ff';
+    
+    // Rainbow animation: shift hue constantly, shift faster when jumping
+    hue = (hue + (p.grounded ? 2 : 10)) % 360;
+    const col = `hsl(${hue}, 100%, 70%)`;
+    
     ctx.strokeStyle = col; ctx.fillStyle = col;
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    ctx.shadowBlur = 10; ctx.shadowColor = col;
+    ctx.shadowBlur = 15; ctx.shadowColor = col;
 
     let armAng, legAng;
     let walk = Math.sin(p.step);
 
     if (!p.grounded) {
-        // Natural airborne pose: arms neutral, legs slightly tucked
         armAng = -1.2; 
         legAng = p.vy < 0 ? 0.8 : 0.2; 
     } else if (moving) {
@@ -164,20 +162,41 @@ function drawStickman(p) {
         legAng = 0.15;
     }
 
-    // 1. Head (Leaner)
     ctx.beginPath(); ctx.arc(0, -21, 7, 0, Math.PI * 2); ctx.fill();
-
-    // 2. Torso (Straight capsule, slender)
     ctx.lineWidth = 6;
     ctx.beginPath(); ctx.moveTo(0, -14); ctx.lineTo(0, 7); ctx.stroke();
+    drawAnatomicalLimb(ctx, 0, -11, -armAng, 9, 8, p.facing, -1, 3, true); 
+    drawAnatomicalLimb(ctx, 0, -11, armAng, 9, 8, p.facing, 1, 3, false);
+    drawAnatomicalLimb(ctx, -2 * p.facing, 7, -legAng - 0.1, 11, 11, p.facing, -1, 4, true); 
+    drawAnatomicalLimb(ctx, 2 * p.facing, 7, legAng + 0.1, 11, 11, p.facing, 1, 4, false); 
 
-    // 3. Arms
-    drawAnatomicalLimb(ctx, 0, -11, -armAng, 9, 8, p.facing, -1, 3, true); // Back
-    drawAnatomicalLimb(ctx, 0, -11, armAng, 9, 8, p.facing, 1, 3, false); // Front
+    ctx.restore();
+}
 
-    // 4. Legs (Offset hips to ensure two legs are always visible)
-    drawAnatomicalLimb(ctx, -2 * p.facing, 7, -legAng - 0.1, 11, 11, p.facing, -1, 4, true); // Back
-    drawAnatomicalLimb(ctx, 2 * p.facing, 7, legAng + 0.1, 11, 11, p.facing, 1, 4, false);  // Front
+function draw3DPlatform(pl) {
+    ctx.save();
+    const depth = 8;
+    ctx.shadowBlur = 15;
+    ctx.shadowColor = pl.color;
+    
+    // Side/Bottom 3D "Depth"
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(pl.x + 4, pl.y + depth, pl.w, pl.h);
+    
+    // Main Brick Face
+    ctx.strokeStyle = pl.color;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(pl.x, pl.y, pl.w, pl.h);
+    
+    // Brick Details (Vertical lines for segments)
+    ctx.beginPath();
+    ctx.moveTo(pl.x + pl.w/3, pl.y); ctx.lineTo(pl.x + pl.w/3, pl.y + pl.h);
+    ctx.moveTo(pl.x + (pl.w/3)*2, pl.y); ctx.lineTo(pl.x + (pl.w/3)*2, pl.y + pl.h);
+    ctx.stroke();
+    
+    // Inner Highlight for Neon Look
+    ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+    ctx.strokeRect(pl.x + 2, pl.y + 2, pl.w - 4, pl.h - 4);
 
     ctx.restore();
 }
@@ -206,14 +225,14 @@ function gameLoop() {
     });
     if (player.grounded) player.lastVy *= 0.8;
     for(let i=platforms.length-1; i>=0; i--) {
-        if (platforms[i].y < -30) {
+        if (platforms[i].y < -40) {
             platforms.splice(i, 1);
-            platforms.push({ x: Math.random() * (canvas.width - 80), y: canvas.height + 50, w: 80, h: 12, passed: false, color: RAINBOW[Math.floor(Math.random() * RAINBOW.length)] });
+            platforms.push({ x: Math.random() * (canvas.width - 80), y: canvas.height + 50, w: 80, h: 20, passed: false, color: RAINBOW[Math.floor(Math.random() * RAINBOW.length)] });
         }
     }
     if (player.y < -60 || player.y > canvas.height + 60) { isGameOver = true; playFX(60, 'sawtooth', 0.3, 0.6); document.getElementById('overlay').style.display = 'flex'; return; }
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    platforms.forEach(pl => { ctx.shadowBlur = 15; ctx.shadowColor = pl.color; ctx.strokeStyle = pl.color; ctx.lineWidth = 3; ctx.strokeRect(pl.x, pl.y, pl.w, pl.h); ctx.shadowBlur = 0; });
+    platforms.forEach(pl => draw3DPlatform(pl));
     drawStickman(player);
     animationId = requestAnimationFrame(gameLoop);
 }
